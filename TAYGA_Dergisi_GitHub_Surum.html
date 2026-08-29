@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>TAYGA Dergisi — Gerçek Yaprak Çevirme</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#11100d}
+body{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center}
+#viewer{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;position:relative}
+#book{position:relative;width:min(96vw,1320px);height:min(91vh,900px);perspective:2600px}
+.spread{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.spread .page{height:100%;max-height:100%;width:auto;max-width:50%;object-fit:contain;display:block;box-shadow:0 5px 22px rgba(0,0,0,.48)}
+.single .page{max-width:70%;box-shadow:0 8px 28px rgba(0,0,0,.55)}
+.gutter{width:8px;height:100%;background:linear-gradient(90deg,#15130f,#383228,#15130f);box-shadow:0 0 18px rgba(0,0,0,.65);z-index:3}
+.turn{
+ position:absolute;top:0;height:100%;width:50%;
+ transform-style:preserve-3d;transform-origin:left center;
+ z-index:20;pointer-events:none;
+ animation:turnForward .95s cubic-bezier(.22,.72,.16,1) forwards;
+}
+.turn.reverse{left:0;transform-origin:right center;animation:turnBackward .95s cubic-bezier(.22,.72,.16,1) forwards}
+.turn .face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;overflow:hidden;background:#eee}
+.turn .face img{width:100%;height:100%;object-fit:cover;display:block}
+.turn .back{transform:rotateY(180deg)}
+.turn::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 45px rgba(0,0,0,.18);pointer-events:none}
+@keyframes turnForward{
+ 0%{transform:rotateY(0deg);box-shadow:0 3px 8px rgba(0,0,0,.12)}
+ 45%{box-shadow:-18px 10px 35px rgba(0,0,0,.42)}
+ 100%{transform:rotateY(-180deg);box-shadow:0 0 0 rgba(0,0,0,0)}
+}
+@keyframes turnBackward{
+ 0%{transform:rotateY(0deg);box-shadow:0 3px 8px rgba(0,0,0,.12)}
+ 45%{box-shadow:18px 10px 35px rgba(0,0,0,.42)}
+ 100%{transform:rotateY(180deg);box-shadow:0 0 0 rgba(0,0,0,0)}
+}
+#controls{
+ position:fixed;left:50%;bottom:17px;transform:translateX(-50%);
+ z-index:100;display:flex;align-items:center;gap:10px;
+ padding:9px 12px;border-radius:28px;background:rgba(8,8,7,.84);
+ backdrop-filter:blur(8px);color:#eee5d1
+}
+button{border:0;border-radius:22px;padding:9px 17px;background:#d8c49a;color:#211f18;font-weight:700;cursor:pointer}
+button:disabled{opacity:.35;cursor:default}
+#count{min-width:120px;text-align:center;font-size:14px}
+#hint{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:100;color:#eee5d1;background:rgba(0,0,0,.5);padding:7px 13px;border-radius:18px;font-size:12px;transition:opacity .5s}
+.hit{position:fixed;top:0;width:25%;height:100%;z-index:90;cursor:pointer}
+#leftHit{left:0}#rightHit{right:0}
+@media(max-width:800px){
+ #book{height:80vh;width:96vw}
+ .spread .page{height:auto;width:calc(50vw - 4px);max-width:none}
+ .single .page{height:auto;width:auto;max-width:82vw;max-height:80vh}
+ .turn{height:100%}
+}
+</style>
+</head>
+<body>
+<div id="viewer"><div id="book"></div></div>
+<div id="leftHit" class="hit"></div><div id="rightHit" class="hit"></div>
+<div id="hint">Sağ tarafa tıkla: sayfayı çevir 📖</div>
+<div id="controls">
+ <button id="prev">‹ Geri</button>
+ <div id="count">Kapak · 1 / 29</div>
+ <button id="next">İleri ›</button>
+</div>
+<script>
+const pages = ['pages/page-01.jpg', 'pages/page-02.jpg', 'pages/page-03.jpg', 'pages/page-04.jpg', 'pages/page-05.jpg', 'pages/page-06.jpg', 'pages/page-07.jpg', 'pages/page-08.jpg', 'pages/page-09.jpg', 'pages/page-10.jpg', 'pages/page-11.jpg', 'pages/page-12.jpg', 'pages/page-13.jpg', 'pages/page-14.jpg', 'pages/page-15.jpg', 'pages/page-16.jpg', 'pages/page-17.jpg', 'pages/page-18.jpg', 'pages/page-19.jpg', 'pages/page-20.jpg', 'pages/page-21.jpg', 'pages/page-22.jpg', 'pages/page-23.jpg', 'pages/page-24.jpg', 'pages/page-25.jpg', 'pages/page-26.jpg', 'pages/page-27.jpg', 'pages/page-28.jpg', 'pages/page-29.jpg'];
+const views = [[0], [1, 2], [3, 4], [5, 6], [7, 8], [9, 10], [11, 12], [13, 14], [15, 16], [17, 18], [19, 20], [21, 22], [23, 24], [25, 26], [27, 28]];
+const book = document.getElementById('book');
+const prev = document.getElementById('prev');
+const next = document.getElementById('next');
+const count = document.getElementById('count');
+let current=0, busy=false;
+
+function img(src, cls='page'){
+ const x=document.createElement('img'); x.className=cls; x.src=src; return x;
+}
+function baseView(){
+ book.innerHTML='';
+ const v=views[current];
+ const spread=document.createElement('div');
+ spread.className='spread'+(v.length===1?' single':'');
+ if(v.length===1){ spread.appendChild(img(pages[v[0]])); }
+ else{
+   spread.appendChild(img(pages[v[0]]));
+   const g=document.createElement('div'); g.className='gutter'; spread.appendChild(g);
+   spread.appendChild(img(pages[v[1]]));
+ }
+ book.appendChild(spread);
+}
+function label(){
+ if(current===0) return 'Kapak · 1 / 29';
+ const a=views[current][0]+1, b=views[current][1]+1;
+ return a+'–'+b+' · 29 sayfa';
+}
+function updateControls(){
+ count.textContent=label();
+ prev.disabled=current===0;
+ next.disabled=current===views.length-1;
+}
+function makeTurn(direction){
+ if(busy) return;
+ const target=current + (direction==='next'?1:-1);
+ if(target<0 || target>=views.length) return;
+ busy=true;
+
+ // Show target spread underneath immediately.
+ const old=current;
+ current=target;
+ const targetView=views[current];
+
+ book.innerHTML='';
+ const under=document.createElement('div');
+ under.className='spread'+(targetView.length===1?' single':'');
+ if(targetView.length===1) under.appendChild(img(pages[targetView[0]]));
+ else{
+   under.appendChild(img(pages[targetView[0]]));
+   const g=document.createElement('div'); g.className='gutter'; under.appendChild(g);
+   under.appendChild(img(pages[targetView[1]]));
+ }
+ book.appendChild(under);
+
+ // Put the page being turned above it.
+ const turn=document.createElement('div');
+ turn.className='turn'+(direction==='prev'?' reverse':'');
+ if(direction==='next'){
+   // The right page of the old spread flips away.
+   const oldPage=views[old].length===1 ? views[old][0] : views[old][1];
+   const newLeft=targetView.length===1 ? targetView[0] : targetView[0];
+   const f=document.createElement('div'); f.className='face front'; f.appendChild(img(pages[oldPage]));
+   const b=document.createElement('div'); b.className='face back'; b.appendChild(img(pages[newLeft]));
+   turn.style.right='0'; turn.style.left='50%';
+   turn.append(f,b);
+ } else {
+   // The left page of the target spread flips back.
+   const oldLeft=views[old].length===1 ? views[old][0] : views[old][0];
+   const newRight=views[target].length===1 ? views[target][0] : views[target][1];
+   const f=document.createElement('div'); f.className='face front'; f.appendChild(img(pages[newRight]));
+   const b=document.createElement('div'); b.className='face back'; b.appendChild(img(pages[oldLeft]));
+   turn.style.left='0'; turn.style.right='50%';
+   turn.append(f,b);
+ }
+ book.appendChild(turn);
+
+ updateControls();
+ setTimeout(()=>{ baseView(); busy=false; }, 970);
+}
+next.onclick=()=>makeTurn('next');
+prev.onclick=()=>makeTurn('prev');
+document.getElementById('rightHit').onclick=()=>makeTurn('next');
+document.getElementById('leftHit').onclick=()=>makeTurn('prev');
+document.addEventListener('keydown',e=>{
+ if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '){e.preventDefault();makeTurn('next')}
+ if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();makeTurn('prev')}
+});
+let sx=0;
+document.addEventListener('touchstart',e=>sx=e.changedTouches[0].clientX,{passive:true});
+document.addEventListener('touchend',e=>{
+ const dx=e.changedTouches[0].clientX-sx;
+ if(Math.abs(dx)>45) makeTurn(dx<0?'next':'prev');
+},{passive:true});
+setTimeout(()=>document.getElementById('hint').style.opacity=0,4200);
+baseView(); updateControls();
+</script>
+</body>
+</html>
